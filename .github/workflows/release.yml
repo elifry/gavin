@@ -58,9 +58,11 @@ jobs:
         if: matrix.os == 'windows-latest'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        shell: cmd
+        shell: pwsh
         run: |
-          gh release upload %GITHUB_REF_NAME% target/release/%{{ matrix.asset_name }}%
+          $asset = "target/release/${{ matrix.asset_name }}"
+          $tag = "${{ github.ref_name }}"
+          gh release upload $tag $asset
 
       - name: Upload Release Asset (Unix)
         if: matrix.os != 'windows-latest'
