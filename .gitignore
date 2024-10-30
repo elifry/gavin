@@ -1,0 +1,37 @@
+# Rust build directory
+/target/
+
+# SQLite database files
+*.db
+*.db-shm
+*.db-wal
+
+# IDE specific files
+.idea/
+*.swp
+*.swo
+.vs/
+
+# Debug files
+*.pdb
+
+# Windows specific
+Thumbs.db
+Desktop.ini
+
+# Rust specific
+**/*.rs.bk
+*.pdb
+Cargo.lock
+
+# Log files
+*.log
+
+# Environment variables
+.env
+
+# Temporary repositories
+temp_repos/
+
+# Report file
+report.md
