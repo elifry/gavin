@@ -16,11 +16,14 @@ jobs:
     steps:
       - name: Create Release
         id: create_release
-        uses: softprops/action-gh-release@v1
-        with:
-          generate_release_notes: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          tag: ${{ github.ref_name }}
+        run: |
+          gh release create "$tag" \
+              --repo="$GITHUB_REPOSITORY" \
+              --title="${GITHUB_REPOSITORY#*/} ${tag#v}" \
+              --generate-notes
 
   build-release:
     needs: create-release
@@ -52,8 +55,8 @@ jobs:
           cp ${{ matrix.artifact_name }} ${{ matrix.asset_name }}
 
       - name: Upload Release Asset
-        uses: softprops/action-gh-release@v1
-        with:
-          files: target/release/${{ matrix.asset_name }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release upload ${{ github.ref_name }} \
+            target/release/${{ matrix.asset_name }}
