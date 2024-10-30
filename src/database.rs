@@ -11,8 +11,9 @@ pub struct Database {
 
 impl Database {
     pub fn new() -> Result<Self> {
-        let app_data = std::env::current_dir()?.join("gavin.db");
-        let conn = Connection::open(app_data)?;
+        // Keep the database in the local project directory
+        let db_path = std::env::current_dir()?.join("gavin.db");
+        let conn = Connection::open(db_path)?;
         
         // Create the table if it doesn't exist
         conn.execute(
