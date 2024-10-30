@@ -54,7 +54,16 @@ jobs:
           cd target/release
           cp ${{ matrix.artifact_name }} ${{ matrix.asset_name }}
 
-      - name: Upload Release Asset
+      - name: Upload Release Asset (Windows)
+        if: matrix.os == 'windows-latest'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: cmd
+        run: |
+          gh release upload %GITHUB_REF_NAME% target/release/%{{ matrix.asset_name }}%
+
+      - name: Upload Release Asset (Unix)
+        if: matrix.os != 'windows-latest'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
