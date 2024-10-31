@@ -27,7 +27,6 @@ mod git_manager;
 use crate::git_manager::GitManager;
 
 mod config;
-use crate::config::Config;
 
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]
