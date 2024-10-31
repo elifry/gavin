@@ -45,9 +45,11 @@ struct Cli {
     #[arg(long = "add-repo")]
     add_repo: Option<String>,
 
+    /// Add multiple repositories to the database
     #[arg(long = "add-multiple-repos")]
     add_multiple_repos: Option<String>,
 
+    /// When adding a repository, use this flag to skip checking if it exists locally
     #[arg(long = "new")]
     new: bool,
 
