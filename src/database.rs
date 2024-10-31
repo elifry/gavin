@@ -45,7 +45,6 @@ impl Database {
         git_manager.ensure_repo_exists().await?;
         
         self.add_repository_sync(url)?;
-        println!("Added repository: {}", url);
         Ok(())
     }
 
