@@ -222,8 +222,9 @@ async fn handle_other_cli_args(cli: &crate::Cli, db: &Database) -> Result<()> {
         let repos = db.list_repositories()?;
         if cli.output_markdown {
             let report = generate_markdown_report(&repos, db).await?;
-            fs::write("report.md", report).await?;
-            println!("Generated markdown report: report.md");
+            let report_path = cli.report_path.as_deref().unwrap_or("report.md");
+            fs::write(report_path, report).await?;
+            println!("Generated markdown report: {}", report_path);
         } else {
             check_all_task_implementations(&repos, None).await?;
         }

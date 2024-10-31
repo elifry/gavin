@@ -33,5 +33,6 @@ Cargo.lock
 # Temporary repositories
 temp_repos/
 
-# Report file
-report.md
+# Report files
+*.md
+!README.md

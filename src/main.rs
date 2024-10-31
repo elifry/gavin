@@ -91,6 +91,10 @@ struct Cli {
     #[arg(long = "output-markdown", requires = "check_tasks")]
     output_markdown: bool,
 
+    /// Specify the output file path for markdown report (requires --output-markdown)
+    #[arg(long = "report-path", requires = "output_markdown")]
+    report_path: Option<String>,
+
     /// Show detailed output
     #[arg(short, long)]
     verbose: bool,
