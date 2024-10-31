@@ -42,9 +42,6 @@ impl Database {
             .ok_or_else(|| anyhow::anyhow!("Git credentials not found. Please set them first with --set-git-credentials"))?;
         
         let git_manager = GitManager::new(credentials.0, credentials.1, url);
-        
-        println!("Testing connection to repository...");
-        git_manager.test_connection().await?;
         git_manager.ensure_repo_exists().await?;
         
         self.add_repository_sync(url)?;
