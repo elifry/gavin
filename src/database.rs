@@ -37,12 +37,17 @@ impl Database {
         Ok(Database { conn })
     }
 
-    pub async fn add_repository(&self, url: &str) -> Result<()> {
+    pub async fn add_repository(&self, url: &str, is_new: bool) -> Result<()> {
         let credentials = self.get_git_credentials()?
             .ok_or_else(|| anyhow::anyhow!("Git credentials not found. Please set them first with --set-git-credentials"))?;
         
         let git_manager = GitManager::new(credentials.0, credentials.1, url);
-        git_manager.ensure_repo_exists().await?;
+        
+        if is_new {
+            git_manager.ensure_repo_exists_new().await?;
+        } else {
+            git_manager.ensure_repo_exists().await?;
+        }
         
         self.add_repository_sync(url)?;
         Ok(())

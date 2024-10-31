@@ -101,7 +101,7 @@ async fn handle_other_cli_args(cli: &crate::Cli, db: &Database) -> Result<()> {
         db.set_git_credentials(credentials)?;
         println!("Git credentials updated successfully");
     } else if let Some(repo_url) = &cli.add_repo {
-        db.add_repository(repo_url).await?;
+        db.add_repository(repo_url, cli.new).await?;
         println!("Added repository: {}", repo_url);
     } else if let Some(repos) = &cli.add_multiple_repos {
         let repo_urls: Vec<&str> = repos.split(',').map(str::trim).collect();
@@ -137,6 +137,7 @@ async fn handle_other_cli_args(cli: &crate::Cli, db: &Database) -> Result<()> {
             .map(|n| n.get())
             .unwrap_or(4);
         let semaphore = Arc::new(Semaphore::new(max_concurrent));
+        let is_new = cli.new; // Clone the flag value before moving into async blocks
         
         let mut handles = Vec::new();
         
@@ -148,7 +149,11 @@ async fn handle_other_cli_args(cli: &crate::Cli, db: &Database) -> Result<()> {
                 let _permit = permit;
                 let git_manager = GitManager::new(creds.0, creds.1, &repo_url);
                 
-                match git_manager.ensure_repo_exists().await {
+                match if is_new {
+                    git_manager.ensure_repo_exists_new().await
+                } else {
+                    git_manager.ensure_repo_exists().await
+                } {
                     Ok(()) => Ok(repo_url),
                     Err(e) => Err((repo_url.clone(), e)),
                 }

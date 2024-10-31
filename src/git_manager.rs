@@ -62,12 +62,18 @@ impl GitManager {
         Ok(())
     }
 
+    // Used when --new is not provided
     pub async fn ensure_repo_exists(&self) -> Result<()> {
         if self.repo_dir.exists() {
             self.update_repo().await
         } else {
             self.clone_repo().await
         }
+    }
+
+    // Used when --new is provided
+    pub async fn ensure_repo_exists_new(&self) -> Result<()> {
+        self.clone_repo().await
     }
 
     async fn clone_repo(&self) -> Result<()> {
