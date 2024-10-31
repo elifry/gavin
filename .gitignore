@@ -36,3 +36,7 @@ temp_repos/
 # Report files
 *.md
 !README.md
+
+# Config file
+gavinconfig.yml
+!gavinconfig-example.yml

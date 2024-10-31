@@ -16,7 +16,6 @@ The CLI is built with `clap` and the data is stored in a `sqlite` database.
 
 ## Future work
 
-- Specify in a config file how to handle and parse specific actions. Right now `gavin` only supports the `gitversion` action explicitly and it does so by hardcoding it.
 - Add a `--dry-run` flag to inspect what `gavin` will do without actually performing any actions.
 - Implement `--verbose` flag more to get more information about what `gavin` is doing.
 - Expand support to more CI/CD platforms than just Azure DevOps such as GitHub Actions and GitLab CI/CD.

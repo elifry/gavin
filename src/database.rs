@@ -4,6 +4,8 @@ use crate::SupportedTask;
 use crate::TaskValidState;
 use crate::git_manager::GitManager;
 use std::path::PathBuf;
+use crate::config::Config;
+use clap::ValueEnum;
 
 pub struct Database {
     conn: Connection,
@@ -204,6 +206,20 @@ impl Database {
             "INSERT OR REPLACE INTO repositories (url) VALUES (?1)",
             params![url],
         )?;
+        Ok(())
+    }
+
+    pub fn merge_config_states(&self, config: &Config) -> Result<()> {
+        // First, clear existing states
+        self.conn.execute("DELETE FROM valid_states", [])?;
+        
+        // Add states from config
+        for task in SupportedTask::value_variants() {
+            for state in config.get_valid_states(task) {
+                self.add_valid_state(task, &state)?;
+            }
+        }
+        
         Ok(())
     }
 }

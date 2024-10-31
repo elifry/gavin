@@ -26,6 +26,9 @@ mod report;
 mod git_manager;
 use crate::git_manager::GitManager;
 
+mod config;
+use crate::config::Config;
+
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]
 struct Cli {
@@ -104,6 +107,10 @@ struct Cli {
     /// Show detailed output
     #[arg(short, long)]
     verbose: bool,
+
+    /// Path to config file (defaults to ./gavinconfig.yml)
+    #[arg(long = "config")]
+    config_path: Option<String>,
 
     /// Set git credentials (username:token format)
     #[arg(long = "set-git-credentials")]

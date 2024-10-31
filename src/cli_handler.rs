@@ -12,8 +12,15 @@ use crate::{
 };
 use tokio::sync::Semaphore;
 use std::sync::Arc;
+use crate::config::Config;
 
 pub async fn handle_cli_args(cli: &crate::Cli, db: &Database) -> Result<()> {
+    // Load config if needed
+    if let Some(config) = load_config_if_needed(cli)? {
+        // Merge config states into database
+        db.merge_config_states(&config)?;
+    }
+
     // Check if any meaningful argument is provided
     let has_args = cli.search_string.is_some() 
         || cli.search_task.is_some()
@@ -280,4 +287,23 @@ async fn handle_list_all_task_states(db: &Database) -> Result<()> {
         println!("{}", crate::format_task_states(task, states));
     }
     Ok(())
+}
+
+fn load_config_if_needed(cli: &crate::Cli) -> Result<Option<Config>> {
+    // Check if the command needs state configuration
+    let needs_config = cli.search_task.is_some()
+        || cli.delete_task_state.is_some()
+        || cli.add_task_state.is_some()
+        || cli.state_value.is_some()
+        || cli.list_task_states.is_some()
+        || cli.list_all_task_states
+        || cli.analyze_tasks
+        || cli.check_tasks;
+
+    if needs_config {
+        let config = Config::load(cli.config_path.as_deref())?;
+        Ok(Some(config))
+    } else {
+        Ok(None)
+    }
 }
