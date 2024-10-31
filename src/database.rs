@@ -13,11 +13,9 @@ pub struct Database {
 
 impl Database {
     pub fn new() -> Result<Self> {
-        // Keep the database in the local project directory
         let db_path = std::env::current_dir()?.join("gavin.db");
         let conn = Connection::open(db_path)?;
         
-        // Create the table if it doesn't exist
         conn.execute(
             "CREATE TABLE IF NOT EXISTS repositories (
                 id INTEGER PRIMARY KEY,
@@ -26,12 +24,20 @@ impl Database {
             [],
         )?;
 
-        // Create git_credentials table if it doesn't exist
         conn.execute(
             "CREATE TABLE IF NOT EXISTS git_credentials (
                 id INTEGER PRIMARY KEY,
                 username TEXT NOT NULL,
                 token BLOB NOT NULL
+            )",
+            [],
+        )?;
+
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS valid_states (
+                id INTEGER PRIMARY KEY,
+                task TEXT NOT NULL,
+                state_json TEXT NOT NULL
             )",
             [],
         )?;
@@ -78,15 +84,6 @@ impl Database {
     }
 
     pub fn add_valid_state(&self, task: &SupportedTask, state: &TaskValidState) -> Result<()> {
-        self.conn.execute(
-            "CREATE TABLE IF NOT EXISTS valid_states (
-                id INTEGER PRIMARY KEY,
-                task TEXT NOT NULL,
-                state_json TEXT NOT NULL
-            )",
-            [],
-        )?;
-
         let state_json = serde_json::to_string(state)
             .map_err(|e| anyhow::anyhow!("Failed to serialize state: {}", e))?;
 
