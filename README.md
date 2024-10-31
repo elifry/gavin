@@ -12,7 +12,7 @@ With `gavin`, you can specify what version in your organization should be used a
 
 It uses `tokio` to perform all operations asynchronously in parallel to speed up the process.
 
-The CLI is built with `clap` and the data is stored in a `sqlite` database.
+The CLI is built with `clap` and the data is stored in a `sqlite` database. Configuration settings such as valid states are stored in a `gavinconfig.yml` file.
 
 ## Future work
 
