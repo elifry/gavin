@@ -36,7 +36,7 @@ impl GitManager {
         }
     }
 
-    pub async fn test_connection(&self) -> Result<Vec<String>> {
+    pub async fn test_connection(&self) -> Result<()> {
         let repo_name = self.repo_dir
             .file_name()
             .and_then(|n| n.to_str())
@@ -55,21 +55,11 @@ impl GitManager {
             let error = String::from_utf8_lossy(&output.stderr);
             println!("✗ Failed to connect to repository {}", repo_name);
             println!("Error: {}", error);
-            return Ok(vec![]);
+            return Err(anyhow::anyhow!("Failed to connect to repository {}: {}", repo_name, error));
         }
 
-        println!("✓ Successfully connected to Azure DevOps repository {}", repo_name);
-        
-        let mut branches = Vec::new();
-        if let Ok(stdout) = String::from_utf8(output.stdout) {
-            for line in stdout.lines() {
-                if let Some(branch) = line.split('\t').nth(1) {
-                    branches.push(branch.replace("refs/heads/", ""));
-                }
-            }
-        }
-
-        Ok(branches)
+        println!("✓ Successfully connected to repository {}", repo_name);
+        Ok(())
     }
 
     pub async fn ensure_repo_exists(&self) -> Result<()> {

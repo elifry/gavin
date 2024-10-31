@@ -105,18 +105,42 @@ async fn handle_other_cli_args(cli: &crate::Cli, db: &Database) -> Result<()> {
         println!("Added repository: {}", repo_url);
     } else if let Some(repos) = &cli.add_multiple_repos {
         let repo_urls: Vec<&str> = repos.split(',').map(str::trim).collect();
+        let credentials = db.get_git_credentials()?
+            .ok_or_else(|| anyhow::anyhow!("Git credentials not found. Please set them first with --set-git-credentials"))?;
+        
+        // First, test all connections sequentially
+        println!("Testing connections to all repositories...");
+        let mut valid_repos = Vec::new();
+        let mut failed_repos = Vec::new();
+        
+        for repo_url in repo_urls {
+            let git_manager = GitManager::new(credentials.0.clone(), credentials.1.clone(), repo_url);
+            match git_manager.test_connection().await {
+                Ok(_) => {
+                    valid_repos.push(repo_url.to_string());
+                }
+                Err(e) => {
+                    println!("✗ Failed to connect to repository {}: {}", repo_url, e);
+                    failed_repos.push((repo_url.to_string(), e));
+                }
+            }
+        }
+
+        if valid_repos.is_empty() {
+            println!("No valid repositories to process.");
+            return Ok(());
+        }
+
+        // Then process valid repos in parallel
+        println!("\nProcessing {} valid repositories...", valid_repos.len());
         let max_concurrent = std::thread::available_parallelism()
             .map(|n| n.get())
             .unwrap_or(4);
         let semaphore = Arc::new(Semaphore::new(max_concurrent));
         
-        // First, test connections and clone repos in parallel
         let mut handles = Vec::new();
-        let credentials = db.get_git_credentials()?
-            .ok_or_else(|| anyhow::anyhow!("Git credentials not found. Please set them first with --set-git-credentials"))?;
         
-        for repo_url in repo_urls {
-            let repo_url = repo_url.to_string();
+        for repo_url in valid_repos {
             let permit = semaphore.clone().acquire_owned().await?;
             let creds = (credentials.0.clone(), credentials.1.clone());
             
@@ -124,12 +148,7 @@ async fn handle_other_cli_args(cli: &crate::Cli, db: &Database) -> Result<()> {
                 let _permit = permit;
                 let git_manager = GitManager::new(creds.0, creds.1, &repo_url);
                 
-                match async {
-                    println!("Testing connection to repository {}...", repo_url);
-                    git_manager.test_connection().await?;
-                    git_manager.ensure_repo_exists().await?;
-                    Ok::<_, anyhow::Error>(())
-                }.await {
+                match git_manager.ensure_repo_exists().await {
                     Ok(()) => Ok(repo_url),
                     Err(e) => Err((repo_url.clone(), e)),
                 }
@@ -139,8 +158,7 @@ async fn handle_other_cli_args(cli: &crate::Cli, db: &Database) -> Result<()> {
         }
 
         let mut success_urls = Vec::new();
-        let mut failed_repos = Vec::new();
-
+        
         for handle in handles {
             match handle.await? {
                 Ok(url) => {
@@ -154,11 +172,11 @@ async fn handle_other_cli_args(cli: &crate::Cli, db: &Database) -> Result<()> {
             }
         }
 
-        // Then, add successful repos to database synchronously
+        // Add successful repos to database synchronously
         println!("\nAdding repositories to database...");
         for url in &success_urls {
             if let Err(e) = db.add_repository_sync(url) {
-                let error_msg = e.to_string(); // Convert error to string before moving
+                let error_msg = e.to_string();
                 println!("✗ Failed to add {} to database: {}", url, error_msg);
                 failed_repos.push((url.clone(), anyhow::anyhow!(error_msg)));
             } else {
@@ -167,7 +185,7 @@ async fn handle_other_cli_args(cli: &crate::Cli, db: &Database) -> Result<()> {
         }
 
         println!("\nSummary:");
-        println!("Successfully added {} repositories", success_urls.len() - failed_repos.len());
+        println!("Successfully added {} repositories", success_urls.len());
         if !failed_repos.is_empty() {
             println!("Failed to process {} repositories:", failed_repos.len());
             for (url, error) in failed_repos {
