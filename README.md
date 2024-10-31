@@ -21,7 +21,6 @@ The CLI is built with `clap` and the data is stored in a `sqlite` database.
 - Implement `--verbose` flag more to get more information about what `gavin` is doing.
 - Expand support to more CI/CD platforms than just Azure DevOps such as GitHub Actions and GitLab CI/CD.
 - Integrate with ticketing systems to create tickets for actions that are not using the standard version.
-- Sparse checkout so that only pipeline files are checked out, not the entire repo.
 - Fix issue with repos that have spaces in the name.
 - Read valid states from a config file so that users do not have to specify the valid states as flags.
 - Fix bug: when checking gitversion task, inaccurately describes invalid states when there is no state definition.
