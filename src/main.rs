@@ -45,6 +45,9 @@ struct Cli {
     #[arg(long = "add-repo")]
     add_repo: Option<String>,
 
+    #[arg(long = "add-multiple-repos")]
+    add_multiple_repos: Option<String>,
+
     /// Delete a repository from the database
     #[arg(long = "delete-repo")]
     delete_repo: Option<String>,

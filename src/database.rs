@@ -45,15 +45,9 @@ impl Database {
         
         println!("Testing connection to repository...");
         git_manager.test_connection().await?;
-        
         git_manager.ensure_repo_exists().await?;
         
-        // Use INSERT OR REPLACE to handle duplicates
-        self.conn.execute(
-            "INSERT OR REPLACE INTO repositories (url) VALUES (?1)",
-            params![url],
-        )?;
-
+        self.add_repository_sync(url)?;
         println!("Added repository: {}", url);
         Ok(())
     }
@@ -202,5 +196,13 @@ impl Database {
             .expect("Failed to get current directory")
             .join("temp_repos")
             .join(repo_name)
+    }
+
+    pub fn add_repository_sync(&self, url: &str) -> Result<()> {
+        self.conn.execute(
+            "INSERT OR REPLACE INTO repositories (url) VALUES (?1)",
+            params![url],
+        )?;
+        Ok(())
     }
 }

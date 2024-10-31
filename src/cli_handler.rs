@@ -8,8 +8,10 @@ use crate::{
     SupportedTask, TaskValidState, find_pipeline_files, 
     search_in_pipelines_concurrent, search_gitversion_tasks,
     check_all_task_implementations, collect_task_usage,
-    ensure_all_repos_exist,
+    ensure_all_repos_exist, GitManager,
 };
+use tokio::sync::Semaphore;
+use std::sync::Arc;
 
 pub async fn handle_cli_args(cli: &crate::Cli, db: &Database) -> Result<()> {
     // Check if any meaningful argument is provided
@@ -18,6 +20,7 @@ pub async fn handle_cli_args(cli: &crate::Cli, db: &Database) -> Result<()> {
         || cli.list_repos
         || cli.list_pipelines
         || cli.add_repo.is_some()
+        || cli.add_multiple_repos.is_some()
         || cli.delete_repo.is_some()
         || cli.add_task_state.is_some()
         || cli.delete_task_state.is_some()
@@ -100,6 +103,77 @@ async fn handle_other_cli_args(cli: &crate::Cli, db: &Database) -> Result<()> {
     } else if let Some(repo_url) = &cli.add_repo {
         db.add_repository(repo_url).await?;
         println!("Added repository: {}", repo_url);
+    } else if let Some(repos) = &cli.add_multiple_repos {
+        let repo_urls: Vec<&str> = repos.split(',').map(str::trim).collect();
+        let max_concurrent = std::thread::available_parallelism()
+            .map(|n| n.get())
+            .unwrap_or(4);
+        let semaphore = Arc::new(Semaphore::new(max_concurrent));
+        
+        // First, test connections and clone repos in parallel
+        let mut handles = Vec::new();
+        let credentials = db.get_git_credentials()?
+            .ok_or_else(|| anyhow::anyhow!("Git credentials not found. Please set them first with --set-git-credentials"))?;
+        
+        for repo_url in repo_urls {
+            let repo_url = repo_url.to_string();
+            let permit = semaphore.clone().acquire_owned().await?;
+            let creds = (credentials.0.clone(), credentials.1.clone());
+            
+            let handle = tokio::spawn(async move {
+                let _permit = permit;
+                let git_manager = GitManager::new(creds.0, creds.1, &repo_url);
+                
+                match async {
+                    println!("Testing connection to repository {}...", repo_url);
+                    git_manager.test_connection().await?;
+                    git_manager.ensure_repo_exists().await?;
+                    Ok::<_, anyhow::Error>(())
+                }.await {
+                    Ok(()) => Ok(repo_url),
+                    Err(e) => Err((repo_url.clone(), e)),
+                }
+            });
+            
+            handles.push(handle);
+        }
+
+        let mut success_urls = Vec::new();
+        let mut failed_repos = Vec::new();
+
+        for handle in handles {
+            match handle.await? {
+                Ok(url) => {
+                    println!("✓ Successfully cloned repository: {}", url);
+                    success_urls.push(url);
+                }
+                Err((url, error)) => {
+                    println!("✗ Failed to clone repository {}: {}", url, error);
+                    failed_repos.push((url, error));
+                }
+            }
+        }
+
+        // Then, add successful repos to database synchronously
+        println!("\nAdding repositories to database...");
+        for url in &success_urls {
+            if let Err(e) = db.add_repository_sync(url) {
+                let error_msg = e.to_string(); // Convert error to string before moving
+                println!("✗ Failed to add {} to database: {}", url, error_msg);
+                failed_repos.push((url.clone(), anyhow::anyhow!(error_msg)));
+            } else {
+                println!("✓ Added to database: {}", url);
+            }
+        }
+
+        println!("\nSummary:");
+        println!("Successfully added {} repositories", success_urls.len() - failed_repos.len());
+        if !failed_repos.is_empty() {
+            println!("Failed to process {} repositories:", failed_repos.len());
+            for (url, error) in failed_repos {
+                println!("✗ {}: {}", url, error);
+            }
+        }
     } else if let Some(path) = &cli.delete_repo {
         db.delete_repository(path)?;
         println!("Deleted repository: {}", path);
