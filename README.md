@@ -25,3 +25,4 @@ The CLI is built with `clap` and the data is stored in a `sqlite` database.
 - Sparse checkout so that only pipeline files are checked out, not the entire repo.
 - Fix issue with repos that have spaces in the name.
 - Read valid states from a config file so that users do not have to specify the valid states as flags.
+- Fix bug: when checking gitversion task, inaccurately describes invalid states when there is no state definition.
