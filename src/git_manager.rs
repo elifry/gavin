@@ -281,4 +281,12 @@ impl GitManager {
             Err(anyhow::anyhow!("Branch {} not found", branch_name))
         }
     }
+
+    pub async fn ensure_repo_exists_no_update(&self) -> Result<()> {
+        if self.repo_dir.exists() {
+            Ok(()) // Skip update, just verify it exists
+        } else {
+            self.clone_repo().await
+        }
+    }
 }

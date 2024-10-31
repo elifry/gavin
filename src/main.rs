@@ -53,6 +53,10 @@ struct Cli {
     #[arg(long = "new")]
     new: bool,
 
+    /// Skip updating repositories before operations such as --check-tasks, --analyze-tasks, etc.
+    #[arg(long = "no-update")]
+    no_update: bool,
+
     /// Delete a repository from the database
     #[arg(long = "delete-repo")]
     delete_repo: Option<String>,
@@ -161,7 +165,7 @@ async fn search_in_pipelines_concurrent(repos: &[String], query: &str) -> Result
         .unwrap_or(4);
     let semaphore = Arc::new(Semaphore::new(max_concurrent));
     let db = Database::new()?;
-    ensure_all_repos_exist(&db).await?;
+    ensure_all_repos_exist(&db, false).await?;
     
     // Create a channel for results
     let (tx, mut rx) = tokio::sync::mpsc::channel(repos.len());
@@ -274,7 +278,7 @@ impl std::fmt::Display for SupportedTask {
 
 async fn search_gitversion_tasks(repos: &[String], _verbose: bool) -> Result<()> {
     let db = Database::new()?;
-    ensure_all_repos_exist(&db).await?;
+    ensure_all_repos_exist(&db, false).await?;
     let valid_states = db.list_valid_states(&SupportedTask::Gitversion)?;
     let valid_states: Vec<GitVersionState> = valid_states.into_iter()
         .map(|state| {
@@ -572,13 +576,13 @@ struct TaskIssues {
     invalid_states: HashMap<String, Vec<String>>,
 }
 
-async fn check_all_task_implementations(repos: &[String], issues: Option<&mut TaskIssues>) -> Result<()> {
+pub(crate) async fn check_all_task_implementations(repos: &[String], issues: Option<&mut TaskIssues>, no_update: bool) -> Result<()> {
     let db = Database::new()?;
     let mut local_issues = TaskIssues::default();
     let issues_ref = issues.unwrap_or(&mut local_issues);
     
     // First ensure all repos exist locally
-    ensure_all_repos_exist(&db).await?;
+    ensure_all_repos_exist(&db, no_update).await?;
     
     // First, collect all tasks from all repositories
     let mut task_implementations: HashMap<String, Vec<TaskImplementation>> = HashMap::new();
@@ -938,15 +942,13 @@ async fn collect_task_usage_data(repos: &[String]) -> Result<HashMap<String, Has
     Ok(final_map)
 }
 
-async fn ensure_all_repos_exist(db: &Database) -> Result<()> {
+async fn ensure_all_repos_exist(db: &Database, skip_update: bool) -> Result<()> {
     let credentials = db.get_git_credentials()?
         .ok_or_else(|| anyhow::anyhow!("Git credentials not found"))?;
 
-    // Ensure temp_repos directory exists before starting any operations
     let temp_dir = std::env::current_dir()?.join("temp_repos");
     tokio::fs::create_dir_all(&temp_dir).await?;
 
-    // Create a semaphore to limit concurrent git operations
     let semaphore = Arc::new(Semaphore::new(4));
     let mut handles = Vec::new();
 
@@ -956,13 +958,16 @@ async fn ensure_all_repos_exist(db: &Database) -> Result<()> {
         
         handles.push(tokio::spawn(async move {
             let git_manager = GitManager::new(creds.0, creds.1, &repo_url);
-            let result = git_manager.ensure_repo_exists().await;
+            let result = if skip_update {
+                git_manager.ensure_repo_exists_no_update().await
+            } else {
+                git_manager.ensure_repo_exists().await
+            };
             drop(permit);
             result
         }));
     }
 
-    // Wait for all updates to complete
     for handle in handles {
         handle.await??;
     }

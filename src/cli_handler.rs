@@ -86,7 +86,7 @@ async fn handle_other_cli_args(cli: &crate::Cli, db: &Database) -> Result<()> {
             }
         }
     } else if cli.list_pipelines {
-        ensure_all_repos_exist(db).await?;
+        ensure_all_repos_exist(db, cli.no_update).await?;
         for repo_url in db.list_repositories()? {
             println!("\n{}", repo_url);
             let repo_path = db.get_local_path(&repo_url);
@@ -216,17 +216,17 @@ async fn handle_other_cli_args(cli: &crate::Cli, db: &Database) -> Result<()> {
     } else if cli.analyze_tasks {
         let repos = db.list_repositories()?;
         // Ensure repos exist before analyzing
-        ensure_all_repos_exist(db).await?;
+        ensure_all_repos_exist(db, cli.no_update).await?;
         collect_task_usage(&repos).await?;
     } else if cli.check_tasks {
         let repos = db.list_repositories()?;
         if cli.output_markdown {
-            let report = generate_markdown_report(&repos, db).await?;
+            let report = generate_markdown_report(&repos, db, cli.no_update).await?;
             let report_path = cli.report_path.as_deref().unwrap_or("report.md");
             fs::write(report_path, report).await?;
             println!("Generated markdown report: {}", report_path);
         } else {
-            check_all_task_implementations(&repos, None).await?;
+            check_all_task_implementations(&repos, None, cli.no_update).await?;
         }
     } else if let (Some(task), Some(state_str)) = (cli.delete_task_state, &cli.state_value) {
         match task {

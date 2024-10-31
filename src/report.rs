@@ -8,10 +8,12 @@ use crate::{
     format_task_states,
     collect_task_usage_data,
     check_all_task_implementations,
+    ensure_all_repos_exist,
 };
 use crate::database::Database;
 
-pub async fn generate_markdown_report(repos: &[String], db: &Database) -> Result<String> {
+pub async fn generate_markdown_report(repos: &[String], db: &Database, no_update: bool) -> Result<String> {
+    ensure_all_repos_exist(db, no_update).await?;
     let mut md = String::new();
     let mut issues = TaskIssues::default();
     
@@ -20,7 +22,7 @@ pub async fn generate_markdown_report(repos: &[String], db: &Database) -> Result
 
     // Summary section
     md.push_str("## Summary\n\n");
-    check_all_task_implementations(repos, Some(&mut issues)).await?;
+    check_all_task_implementations(repos, Some(&mut issues), no_update).await?;
     
     generate_issues_summary(&mut md, &issues);
     generate_valid_states_section(&mut md, db).await?;
