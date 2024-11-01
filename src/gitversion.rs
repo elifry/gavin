@@ -1,6 +1,6 @@
-use serde::{Serialize, Deserialize};
-use std::path::PathBuf;
 use anyhow::Result;
+use serde::{Deserialize, Serialize};
+use std::path::PathBuf;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct GitVersionState {
@@ -11,8 +11,8 @@ pub struct GitVersionState {
 
 #[derive(Debug)]
 pub struct GitVersionImplementation {
-    pub setup: Option<(String, Option<String>)>,     // (version, spec_version)
-    pub execute: Option<String>,                     // version
+    pub setup: Option<(String, Option<String>)>, // (version, spec_version)
+    pub execute: Option<String>,                 // version
     pub file_path: PathBuf,
 }
 
@@ -29,7 +29,9 @@ impl GitVersionState {
         // Expected format: "setup:VERSION,execute:VERSION,spec:VERSION"
         let parts: Vec<&str> = s.split(',').collect();
         if parts.len() != 3 {
-            return Err("Invalid format. Expected 'setup:VERSION,execute:VERSION,spec:VERSION'".to_string());
+            return Err(
+                "Invalid format. Expected 'setup:VERSION,execute:VERSION,spec:VERSION'".to_string(),
+            );
         }
 
         let mut setup = None;

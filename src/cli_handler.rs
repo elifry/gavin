@@ -1,19 +1,14 @@
-use anyhow::Result;
-use std::sync::Arc;
-use tokio::sync::Semaphore;
-use tokio::fs;
-use clap::CommandFactory;
 use crate::{
-    Config,
-    Database, SupportedTask, TaskValidState, GitVersionState,
-    find_pipeline_files, search_in_pipelines_concurrent,
-    search_gitversion_tasks, check_all_task_implementations,
-    collect_task_usage, ensure_all_repos_exist, search_default_task,
-    git_manager::GitManager,
-    cli::Cli,
-    report::generate_markdown_report,
-    utils::sanitize_file_path,
+    check_all_task_implementations, cli::Cli, collect_task_usage, ensure_all_repos_exist,
+    find_pipeline_files, git_manager::GitManager, report::generate_markdown_report,
+    search_default_task, search_gitversion_tasks, search_in_pipelines_concurrent,
+    utils::sanitize_file_path, Config, Database, GitVersionState, SupportedTask, TaskValidState,
 };
+use anyhow::Result;
+use clap::CommandFactory;
+use std::sync::Arc;
+use tokio::fs;
+use tokio::sync::Semaphore;
 
 pub async fn handle_cli_args(cli: &Cli, db: &Database) -> Result<()> {
     // Load config if needed
@@ -23,7 +18,7 @@ pub async fn handle_cli_args(cli: &Cli, db: &Database) -> Result<()> {
     }
 
     // Check if any meaningful argument is provided
-    let has_args = cli.search_string.is_some() 
+    let has_args = cli.search_string.is_some()
         || cli.search_task.is_some()
         || cli.list_repos
         || cli.list_pipelines
@@ -44,28 +39,34 @@ pub async fn handle_cli_args(cli: &Cli, db: &Database) -> Result<()> {
     }
 
     // Validate state_value is only used with appropriate commands
-    if cli.state_value.is_some() && cli.add_task_state.is_none() && cli.delete_task_state.is_none() {
+    if cli.state_value.is_some() && cli.add_task_state.is_none() && cli.delete_task_state.is_none()
+    {
         println!("--state-value can only be used with --add-task-state or --delete-task-state");
         std::process::exit(1);
     }
 
-    match (&cli.search_string, &cli.search_task, cli.list_repos, cli.list_pipelines) {
+    match (
+        &cli.search_string,
+        &cli.search_task,
+        cli.list_repos,
+        cli.list_pipelines,
+    ) {
         (Some(query), _, _, _) => {
             let repos = db.list_repositories()?;
             search_in_pipelines_concurrent(&repos, query).await?;
-        },
+        }
         (_, Some(task), _, _) => {
             let repos = db.list_repositories()?;
             match task.to_string().as_str() {
                 "gitversion" => search_gitversion_tasks(&repos, cli.verbose).await?,
                 task_name => search_default_task(&repos, task_name, cli.verbose).await?,
             }
-        },
+        }
         (_, _, true, _) => {
             for repo in db.list_repositories()? {
                 println!("{}", repo);
             }
-        },
+        }
         (_, _, _, true) => {
             for repo in db.list_repositories()? {
                 println!("{}", repo);
@@ -77,7 +78,7 @@ pub async fn handle_cli_args(cli: &Cli, db: &Database) -> Result<()> {
                     }
                 }
             }
-        },
+        }
         _ => handle_other_cli_args(cli, db).await?,
     }
 
@@ -114,16 +115,20 @@ async fn handle_other_cli_args(cli: &Cli, db: &Database) -> Result<()> {
         println!("Added repository: {}", repo_url);
     } else if let Some(repos) = &cli.add_multiple_repos {
         let repo_urls: Vec<&str> = repos.split(',').map(str::trim).collect();
-        let credentials = db.get_git_credentials()?
-            .ok_or_else(|| anyhow::anyhow!("Git credentials not found. Please set them first with --set-git-credentials"))?;
-        
+        let credentials = db.get_git_credentials()?.ok_or_else(|| {
+            anyhow::anyhow!(
+                "Git credentials not found. Please set them first with --set-git-credentials"
+            )
+        })?;
+
         // First, test all connections sequentially
         println!("Testing connections to all repositories...");
         let mut valid_repos = Vec::new();
         let mut failed_repos = Vec::new();
-        
+
         for repo_url in repo_urls {
-            let git_manager = GitManager::new(credentials.0.clone(), credentials.1.clone(), repo_url);
+            let git_manager =
+                GitManager::new(credentials.0.clone(), credentials.1.clone(), repo_url);
             match git_manager.test_connection().await {
                 Ok(_) => {
                     valid_repos.push(repo_url.to_string());
@@ -147,17 +152,17 @@ async fn handle_other_cli_args(cli: &Cli, db: &Database) -> Result<()> {
             .unwrap_or(4);
         let semaphore = Arc::new(Semaphore::new(max_concurrent));
         let is_new = cli.new; // Clone the flag value before moving into async blocks
-        
+
         let mut handles = Vec::new();
-        
+
         for repo_url in valid_repos {
             let permit = semaphore.clone().acquire_owned().await?;
             let creds = (credentials.0.clone(), credentials.1.clone());
-            
+
             let handle = tokio::spawn(async move {
                 let _permit = permit;
                 let git_manager = GitManager::new(creds.0, creds.1, &repo_url);
-                
+
                 match if is_new {
                     git_manager.ensure_repo_exists_new().await
                 } else {
@@ -167,12 +172,12 @@ async fn handle_other_cli_args(cli: &Cli, db: &Database) -> Result<()> {
                     Err(e) => Err((repo_url.clone(), e)),
                 }
             });
-            
+
             handles.push(handle);
         }
 
         let mut success_urls = Vec::new();
-        
+
         for handle in handles {
             match handle.await? {
                 Ok(url) => {
@@ -209,14 +214,16 @@ async fn handle_other_cli_args(cli: &Cli, db: &Database) -> Result<()> {
     } else if let Some(path) = &cli.delete_repo {
         db.delete_repository(path)?;
         println!("Deleted repository: {}", path);
-    } else if let (Some(task_name), Some(state_str)) = (cli.add_task_state.clone(), &cli.state_value) {
+    } else if let (Some(task_name), Some(state_str)) =
+        (cli.add_task_state.clone(), &cli.state_value)
+    {
         match &task_name {
             SupportedTask::Gitversion => {
                 let state = GitVersionState::from_string(state_str)
                     .map_err(|e| anyhow::anyhow!("Invalid state format: {}", e))?;
                 db.add_valid_state(&task_name, &TaskValidState::Gitversion(state))?;
                 println!("Added valid state for GitVersion");
-            },
+            }
             SupportedTask::Default(name) => {
                 db.add_valid_state(&task_name, &TaskValidState::Default(state_str.to_string()))?;
                 println!("Added valid state for {}", name);
@@ -235,12 +242,12 @@ async fn handle_other_cli_args(cli: &Cli, db: &Database) -> Result<()> {
         let repos = db.list_repositories()?;
         // Ensure repos exist before checking tasks
         ensure_all_repos_exist(db, cli.no_update).await?;
-        
+
         if cli.output_markdown {
             let issues = check_all_task_implementations(&repos, None, cli.no_update).await?;
             let report = generate_markdown_report(&repos, db, &issues).await?;
             let report_path = cli.report_path.as_deref().unwrap_or("report.md");
-            
+
             // Sanitize the output path
             let safe_path = sanitize_file_path(report_path);
             fs::write(&safe_path, report).await?;
@@ -251,15 +258,11 @@ async fn handle_other_cli_args(cli: &Cli, db: &Database) -> Result<()> {
     } else if let Some(task) = &cli.delete_task_state {
         if let Some(state_value) = &cli.state_value {
             let state = match task {
-                SupportedTask::Gitversion => {
-                    TaskValidState::Gitversion(
-                        GitVersionState::from_string(state_value)
-                            .map_err(|e| anyhow::anyhow!("Invalid GitVersion state format: {}", e))?
-                    )
-                }
-                SupportedTask::Default(_) => {
-                    TaskValidState::Default(state_value.to_string())
-                }
+                SupportedTask::Gitversion => TaskValidState::Gitversion(
+                    GitVersionState::from_string(state_value)
+                        .map_err(|e| anyhow::anyhow!("Invalid GitVersion state format: {}", e))?,
+                ),
+                SupportedTask::Default(_) => TaskValidState::Default(state_value.to_string()),
             };
             db.delete_valid_state(task, &state)?;
             println!("Deleted task state for {}: {}", task, state_value);
@@ -277,7 +280,7 @@ async fn handle_other_cli_args(cli: &Cli, db: &Database) -> Result<()> {
 
 async fn handle_list_all_task_states(db: &Database) -> Result<()> {
     let tasks = db.get_all_tasks()?;
-    
+
     for task in tasks {
         let states = db.list_valid_states(&task)?;
         println!("\nValid states for {}:", task);

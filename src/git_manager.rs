@@ -9,41 +9,37 @@ pub struct GitManager {
 
 impl GitManager {
     pub fn new(username: String, token: String, repo_url: &str) -> Self {
-        let repo_name = repo_url
-            .split('/')
-            .last()
-            .unwrap_or("repo")
-            .to_string();
+        let repo_name = repo_url.split('/').last().unwrap_or("repo").to_string();
 
         let repo_url = if repo_url.contains("@") {
             let parts: Vec<&str> = repo_url.splitn(2, '@').collect();
             format!("https://{}:{}@{}", username, token, parts[1])
         } else {
-            format!("https://{}:{}@{}", 
-                username, 
-                token, 
-                repo_url.trim_start_matches("https://"))
+            format!(
+                "https://{}:{}@{}",
+                username,
+                token,
+                repo_url.trim_start_matches("https://")
+            )
         };
-        
+
         let repo_dir = std::env::current_dir()
             .expect("Failed to get current directory")
             .join("temp_repos")
             .join(repo_name);
 
-        Self {
-            repo_url,
-            repo_dir,
-        }
+        Self { repo_url, repo_dir }
     }
 
     pub async fn test_connection(&self) -> Result<()> {
-        let repo_name = self.repo_dir
+        let repo_name = self
+            .repo_dir
             .file_name()
             .and_then(|n| n.to_str())
             .unwrap_or("unknown");
-            
+
         println!("Testing Git connection for {}...", repo_name);
-        
+
         let output = Command::new("git")
             .arg("ls-remote")
             .arg("--heads")
@@ -55,7 +51,11 @@ impl GitManager {
             let error = String::from_utf8_lossy(&output.stderr);
             println!("✗ Failed to connect to repository {}", repo_name);
             println!("Error: {}", error);
-            return Err(anyhow::anyhow!("Failed to connect to repository {}: {}", repo_name, error));
+            return Err(anyhow::anyhow!(
+                "Failed to connect to repository {}: {}",
+                repo_name,
+                error
+            ));
         }
 
         println!("✓ Successfully connected to repository {}", repo_name);
@@ -77,16 +77,17 @@ impl GitManager {
     }
 
     async fn clone_repo(&self) -> Result<()> {
-        let repo_name = self.repo_dir
+        let repo_name = self
+            .repo_dir
             .file_name()
             .and_then(|n| n.to_str())
             .unwrap_or("unknown");
-            
+
         println!("\nCloning repository {}...", repo_name);
-        
+
         // Create the repository directory itself, not just the parent
         tokio::fs::create_dir_all(&self.repo_dir).await?;
-        
+
         // Initialize empty repo
         let output = Command::new("git")
             .args(["init"])
@@ -124,7 +125,7 @@ impl GitManager {
 
         let sparse_checkout_dir = self.repo_dir.join(".git").join("info");
         tokio::fs::create_dir_all(&sparse_checkout_dir).await?;
-        
+
         let sparse_checkout_file = sparse_checkout_dir.join("sparse-checkout");
         tokio::fs::write(&sparse_checkout_file, sparse_patterns.join("\n")).await?;
 
@@ -146,19 +147,31 @@ impl GitManager {
                 Ok(branch) => branch,
                 Err(_) => match Self::try_fetch_branch(&self.repo_dir, "master").await {
                     Ok(branch) => branch,
-                    Err(_) => return Err(anyhow::anyhow!("Failed to fetch repository: no default branch found")),
-                }
-            }
+                    Err(_) => {
+                        return Err(anyhow::anyhow!(
+                            "Failed to fetch repository: no default branch found"
+                        ))
+                    }
+                },
+            },
         };
 
         // Create and checkout the branch properly
         Command::new("git")
-            .args(["checkout", "-b", &default_branch, &format!("origin/{}", default_branch)])
+            .args([
+                "checkout",
+                "-b",
+                &default_branch,
+                &format!("origin/{}", default_branch),
+            ])
             .current_dir(&self.repo_dir)
             .output()
             .await?;
 
-        println!("✓ Successfully cloned repository {} with sparse checkout", repo_name);
+        println!(
+            "✓ Successfully cloned repository {} with sparse checkout",
+            repo_name
+        );
         Ok(())
     }
 
@@ -178,11 +191,12 @@ impl GitManager {
     }
 
     async fn update_repo(&self) -> Result<()> {
-        let repo_name = self.repo_dir
+        let repo_name = self
+            .repo_dir
             .file_name()
             .and_then(|n| n.to_str())
             .unwrap_or("unknown");
-        
+
         println!("Repository {} exists, updating...", repo_name);
 
         // Get current branch name
@@ -192,8 +206,10 @@ impl GitManager {
             .output()
             .await?;
 
-        let current_branch = String::from_utf8_lossy(&branch_output.stdout).trim().to_string();
-        
+        let current_branch = String::from_utf8_lossy(&branch_output.stdout)
+            .trim()
+            .to_string();
+
         // If we're in detached HEAD state, try branches in order
         if current_branch == "HEAD" {
             let checkout_result = match Self::try_checkout_branch(&self.repo_dir, "develop").await {
@@ -201,11 +217,14 @@ impl GitManager {
                 Err(_) => match Self::try_checkout_branch(&self.repo_dir, "main").await {
                     Ok(_) => Ok(()),
                     Err(_) => Self::try_checkout_branch(&self.repo_dir, "master").await,
-                }
+                },
             };
 
             if let Err(e) = checkout_result {
-                return Err(anyhow::anyhow!("Failed to checkout any default branch: {}", e));
+                return Err(anyhow::anyhow!(
+                    "Failed to checkout any default branch: {}",
+                    e
+                ));
             }
         }
 

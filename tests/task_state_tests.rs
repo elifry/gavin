@@ -1,4 +1,4 @@
-use gavin::{TaskValidState, GitVersionState};
+use gavin::{GitVersionState, TaskValidState};
 
 #[test]
 fn test_task_valid_state_serialization() {

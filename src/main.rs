@@ -1,7 +1,7 @@
 use anyhow::Result;
-use gavin::{Database, handle_cli_args};
-use gavin::cli::Cli;
 use clap::Parser;
+use gavin::cli::Cli;
+use gavin::{handle_cli_args, Database};
 
 #[tokio::main]
 async fn main() -> Result<()> {

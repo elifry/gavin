@@ -1,7 +1,7 @@
 use anyhow::Result;
-use gavin::{Database, SupportedTask, TaskValidState, GitVersionState};
-use tempfile::tempdir;
+use gavin::{Database, GitVersionState, SupportedTask, TaskValidState};
 use std::env;
+use tempfile::tempdir;
 
 #[tokio::test]
 async fn test_task_state_deletion() -> Result<()> {
@@ -80,10 +80,10 @@ async fn test_cli_task_state_operations() -> Result<()> {
     // Test adding a task state
     let task = "copyfiles";
     let state = "1";
-    
+
     let task_obj = SupportedTask::Default(task.to_string());
     let state_obj = TaskValidState::Default(state.to_string());
-    
+
     db.add_valid_state(&task_obj, &state_obj)?;
 
     // Verify state was added

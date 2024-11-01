@@ -11,8 +11,12 @@ fn test_version_comparison() {
     ];
 
     for (v1, v2) in versions {
-        assert!(v1.to_string().version_eq(v2), 
-            "Expected {} to equal {}", v1, v2);
+        assert!(
+            v1.to_string().version_eq(v2),
+            "Expected {} to equal {}",
+            v1,
+            v2
+        );
     }
 }
 
