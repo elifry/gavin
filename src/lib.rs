@@ -7,7 +7,7 @@ use walkdir::WalkDir;
 use tokio::sync::Semaphore;
 use tokio::fs;
 use regex::Regex;
-use itertools::Itertools;
+// use itertools::Itertools;
 use semver::Version;
 
 // Re-export modules and types
@@ -525,9 +525,143 @@ pub(crate) async fn check_all_task_implementations(
         
         // Special handling for GitVersion tasks
         if task_name == "gitversion/setup" || task_name == "gitversion/execute" {
-            // Keep existing GitVersion handling
+            // Get valid states from database
             let valid_states = db.list_valid_states(&SupportedTask::Gitversion)?;
-            // ... rest of GitVersion handling
+            let valid_states: Vec<GitVersionState> = valid_states.into_iter()
+                .map(|state| {
+                    match state {
+                        TaskValidState::Gitversion(gv) => gv,
+                        TaskValidState::Default(_) => panic!("Expected GitVersion state, got Default state"),
+                    }
+                })
+                .collect();
+            // Group implementations by repo to collect both setup and execute
+            let mut repo_implementations: HashMap<String, Vec<(&TaskImplementation, &str)>> = HashMap::new();
+            
+            // Get both setup and execute implementations
+            let empty_vec = Vec::new();
+            let setup_impls = task_implementations.get("gitversion/setup").unwrap_or(&empty_vec);
+            let execute_impls = task_implementations.get("gitversion/execute").unwrap_or(&empty_vec);
+            
+            // Combine both sets of implementations
+            for impl_ in setup_impls {
+                repo_implementations
+                    .entry(impl_.repo_name.clone())
+                    .or_default()
+                    .push((impl_, "gitversion/setup"));
+            }
+            
+            for impl_ in execute_impls {
+                repo_implementations
+                    .entry(impl_.repo_name.clone())
+                    .or_default()
+                    .push((impl_, "gitversion/execute"));
+            }
+            // Sort repos for consistent output
+            let mut repo_names: Vec<_> = repo_implementations.keys().collect();
+            repo_names.sort();
+            for repo_name in &repo_names {
+                let impls = repo_implementations.get(*repo_name).unwrap();
+                
+                // Find matching setup and execute implementations
+                let mut setup_version = None;
+                let mut execute_version = None;
+                let mut spec_version = None;
+                let mut file_path = None;
+                for (impl_, task_type) in impls {
+                    match *task_type {
+                        "gitversion/setup" => {
+                            setup_version = Some(impl_.version.clone());
+                            file_path = Some(impl_.file_path.clone());
+                            
+                            // Extract spec version from file content
+                            if let Ok(content) = std::fs::read_to_string(&impl_.file_path) {
+                                let lines: Vec<&str> = content.lines().collect();
+                                for (i, line) in lines.iter().enumerate() {
+                                    if line.contains("task: gitversion/setup") {
+                                        // Look ahead for versionSpec
+                                        for next_line in lines.iter().skip(i + 1).take(10) {
+                                            let next_trimmed = next_line.trim();
+                                            if next_trimmed.contains("versionSpec:") {
+                                                spec_version = Some(
+                                                    next_trimmed
+                                                        .split(':')
+                                                        .nth(1)
+                                                        .unwrap_or("")
+                                                        .trim()
+                                                        .trim_matches('\'')
+                                                        .trim_matches('"')
+                                                        .to_string()
+                                                );
+                                                break;
+                                            }
+                                            if next_trimmed.contains("task:") {
+                                                break;
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        },
+                        "gitversion/execute" => {
+                            execute_version = Some(impl_.version.clone());
+                        },
+                        _ => {}
+                    }
+                }
+                // Validate against valid states
+                let mut is_valid = false;
+                for state in &valid_states {
+                    if setup_version.as_ref().map_or(false, |v| v == &state.setup_version) &&
+                       execute_version.as_ref().map_or(false, |v| v == &state.execute_version) &&
+                       spec_version.as_ref().map_or(false, |s| s == &state.spec_version) {
+                        is_valid = true;
+                        break;
+                    }
+                }
+                let status = if is_valid { "✓" } else { "✗" };
+                let path_info = if let Some(path) = &file_path {
+                    format!(" ({})", 
+                        path.strip_prefix(repo_name)
+                            .unwrap_or(path)
+                            .display())
+                } else {
+                    String::new()
+                };
+                let default_str = "?".to_string();
+                println!("{} {:<25} {} | {} | {}{}", 
+                    status,
+                    repo_name,
+                    setup_version.as_ref().unwrap_or(&default_str),
+                    execute_version.unwrap_or_else(|| "?".to_string()),
+                    spec_version.unwrap_or_else(|| "?".to_string()),
+                    path_info
+                );
+                // Track invalid states
+                if !is_valid {
+                    issues_ref.invalid_states
+                        .entry(task_name.to_string())
+                        .or_default()
+                        .entry(repo_name.to_string())
+                        .or_default()
+                        .push(TaskImplementation {
+                            repo_name: repo_name.to_string(),
+                            version: setup_version.unwrap_or_else(|| "?".to_string()),
+                            file_path: file_path.clone().unwrap_or_default(),
+                        });
+                }
+            }
+            // Show valid states if we're processing setup tasks
+            if task_name == "gitversion/setup" {
+                println!("\nValid states:");
+                for state in &valid_states {
+                    println!("  - setup@{} | execute@{} | spec@{}", 
+                        state.setup_version,
+                        state.execute_version,
+                        state.spec_version
+                    );
+                }
+            }
         } else {
             // Handle other tasks
             let task = SupportedTask::Default(task_name.clone());
