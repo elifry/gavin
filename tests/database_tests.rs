@@ -5,12 +5,12 @@ use std::env;
 use tempfile::tempdir;
 
 #[tokio::test]
-async fn test_task_state_operations() {
+async fn test_task_state_operations() -> Result<()> {
     // Create temporary directory for test database
-    let temp_dir = tempdir().unwrap();
-    env::set_current_dir(temp_dir.path()).unwrap();
+    let temp_dir = tempdir()?;
+    env::set_current_dir(temp_dir.path())?;
 
-    let db = Database::new().unwrap();
+    let db = Database::new()?;
 
     // Test PowerShell state
     let powershell_task = SupportedTask::Default("powershell".to_string());
@@ -32,9 +32,11 @@ async fn test_task_state_operations() {
     assert_eq!(states_upper[0], powershell_state);
 
     // Delete state
-    db.delete_valid_state(&powershell_task, &powershell_state);
-    let states_after_delete = db.list_valid_states(&powershell_task).unwrap();
+    db.delete_valid_state(&powershell_task, &powershell_state)?;
+    let states_after_delete = db.list_valid_states(&powershell_task)?;
     assert_eq!(states_after_delete.len(), 0);
+
+    Ok(())
 }
 
 #[tokio::test]
