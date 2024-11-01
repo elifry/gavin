@@ -275,35 +275,6 @@ async fn handle_other_cli_args(cli: &Cli, db: &Database) -> Result<()> {
     Ok(())
 }
 
-// async fn handle_list_task_states(task: SupportedTask, db: &Database) -> Result<()> {
-//     let states = db.list_valid_states(&task)?;
-//     println!("\nValid states for {}:", task);
-//     println!("{}", "-".repeat(60));
-//     if states.is_empty() {
-//         println!("  No valid states defined yet.");
-//         println!("  To add a state, use:");
-//         println!("    --add-task-state {} --state-value \"setup:VERSION,execute:VERSION,spec:VERSION\"", task);
-//         println!("  Example:");
-//         println!("    --add-task-state {} --state-value \"setup:3,execute:3,spec:6.0.3\"", task);
-//     } else {
-//         for state in states {
-//             match state {
-//                 TaskValidState::Gitversion(gv) => {
-//                     println!("  setup: v{}", gv.setup_version);
-//                     println!("  execute: v{}", gv.execute_version);
-//                     println!("  spec: v{}", gv.spec_version);
-//                     println!();
-//                 },
-//                 TaskValidState::Default(version) => {
-//                     println!("  version: v{}", version);
-//                     println!();
-//                 }
-//             }
-//         }
-//     }
-//     Ok(())
-// }
-
 async fn handle_list_all_task_states(db: &Database) -> Result<()> {
     let tasks = db.get_all_tasks()?;
     
@@ -333,12 +304,6 @@ fn load_config_if_needed(cli: &Cli) -> Result<Option<Config>> {
         Ok(None)
     }
 }
-
-// fn list_supported_tasks() {
-//     for task in SupportedTask::get_all_variants() {
-//         println!("  {}", task);
-//     }
-// }
 
 fn list_task_states(db: &Database, task: &SupportedTask) -> Result<()> {
     let states = db.list_valid_states(task)?;

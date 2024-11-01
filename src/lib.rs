@@ -52,7 +52,7 @@ pub enum SupportedTask {
 }
 
 #[derive(Debug, Clone, Ord, PartialOrd, Eq, PartialEq)]
-struct TaskImplementation {
+pub struct TaskImplementation {
     repo_name: String,
     version: String,
     file_path: PathBuf,
