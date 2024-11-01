@@ -1,20 +1,21 @@
 use anyhow::Result;
-use tokio::fs;
-use crate::database::Database;
-use crate::gitversion::GitVersionState;
-use clap::{ValueEnum, CommandFactory};
-use crate::report::generate_markdown_report;
-use crate::{
-    SupportedTask, TaskValidState, find_pipeline_files, 
-    search_in_pipelines_concurrent, search_gitversion_tasks,
-    check_all_task_implementations, collect_task_usage,
-    ensure_all_repos_exist, GitManager,
-};
-use tokio::sync::Semaphore;
 use std::sync::Arc;
-use crate::config::Config;
+use tokio::sync::Semaphore;
+use tokio::fs;
+use clap::CommandFactory;
+use crate::{
+    Config,
+    Database, SupportedTask, TaskValidState, GitVersionState,
+    find_pipeline_files, search_in_pipelines_concurrent,
+    search_gitversion_tasks, check_all_task_implementations,
+    collect_task_usage, ensure_all_repos_exist, search_default_task,
+    git_manager::GitManager,
+    cli::Cli,
+    report::generate_markdown_report,
+    utils::sanitize_file_path,
+};
 
-pub async fn handle_cli_args(cli: &crate::Cli, db: &Database) -> Result<()> {
+pub async fn handle_cli_args(cli: &Cli, db: &Database) -> Result<()> {
     // Load config if needed
     if let Some(config) = load_config_if_needed(cli)? {
         // Merge config states into database
@@ -38,7 +39,7 @@ pub async fn handle_cli_args(cli: &crate::Cli, db: &Database) -> Result<()> {
         || cli.set_git_credentials.is_some();
 
     if !has_args {
-        crate::Cli::command().print_help()?;
+        Cli::command().print_help()?;
         std::process::exit(0);
     }
 
@@ -55,8 +56,9 @@ pub async fn handle_cli_args(cli: &crate::Cli, db: &Database) -> Result<()> {
         },
         (_, Some(task), _, _) => {
             let repos = db.list_repositories()?;
-            match task {
-                SupportedTask::Gitversion => search_gitversion_tasks(&repos, cli.verbose).await?,
+            match task.to_string().as_str() {
+                "gitversion" => search_gitversion_tasks(&repos, cli.verbose).await?,
+                task_name => search_default_task(&repos, task_name, cli.verbose).await?,
             }
         },
         (_, _, true, _) => {
@@ -82,7 +84,7 @@ pub async fn handle_cli_args(cli: &crate::Cli, db: &Database) -> Result<()> {
     Ok(())
 }
 
-async fn handle_other_cli_args(cli: &crate::Cli, db: &Database) -> Result<()> {
+async fn handle_other_cli_args(cli: &Cli, db: &Database) -> Result<()> {
     if cli.list_repos {
         let repos = db.list_repositories()?;
         if repos.is_empty() {
@@ -207,17 +209,21 @@ async fn handle_other_cli_args(cli: &crate::Cli, db: &Database) -> Result<()> {
     } else if let Some(path) = &cli.delete_repo {
         db.delete_repository(path)?;
         println!("Deleted repository: {}", path);
-    } else if let (Some(task), Some(state_str)) = (cli.add_task_state, &cli.state_value) {
-        match task {
+    } else if let (Some(task_name), Some(state_str)) = (cli.add_task_state.clone(), &cli.state_value) {
+        match &task_name {
             SupportedTask::Gitversion => {
                 let state = GitVersionState::from_string(state_str)
                     .map_err(|e| anyhow::anyhow!("Invalid state format: {}", e))?;
-                db.add_valid_state(&task, &TaskValidState::Gitversion(state))?;
+                db.add_valid_state(&task_name, &TaskValidState::Gitversion(state))?;
                 println!("Added valid state for GitVersion");
+            },
+            SupportedTask::Default(name) => {
+                db.add_valid_state(&task_name, &TaskValidState::Default(state_str.to_string()))?;
+                println!("Added valid state for {}", name);
             }
         }
-    } else if let Some(task) = cli.list_task_states {
-        handle_list_task_states(task, db).await?;
+    } else if let Some(task) = &cli.list_task_states {
+        list_task_states(db, task)?;
     } else if cli.list_all_task_states {
         handle_list_all_task_states(db).await?;
     } else if cli.analyze_tasks {
@@ -227,22 +233,39 @@ async fn handle_other_cli_args(cli: &crate::Cli, db: &Database) -> Result<()> {
         collect_task_usage(&repos).await?;
     } else if cli.check_tasks {
         let repos = db.list_repositories()?;
+        // Ensure repos exist before checking tasks
+        ensure_all_repos_exist(db, cli.no_update).await?;
+        
         if cli.output_markdown {
-            let report = generate_markdown_report(&repos, db, cli.no_update).await?;
+            let issues = check_all_task_implementations(&repos, None, cli.no_update).await?;
+            let report = generate_markdown_report(&repos, &db, &issues).await?;
             let report_path = cli.report_path.as_deref().unwrap_or("report.md");
-            fs::write(report_path, report).await?;
-            println!("Generated markdown report: {}", report_path);
+            
+            // Sanitize the output path
+            let safe_path = sanitize_file_path(report_path);
+            fs::write(&safe_path, report).await?;
+            println!("Generated markdown report: {}", safe_path.display());
         } else {
-            check_all_task_implementations(&repos, None, cli.no_update).await?;
+            let _issues = check_all_task_implementations(&repos, None, cli.no_update).await?;
         }
-    } else if let (Some(task), Some(state_str)) = (cli.delete_task_state, &cli.state_value) {
-        match task {
-            SupportedTask::Gitversion => {
-                let state = GitVersionState::from_string(state_str)
-                    .map_err(|e| anyhow::anyhow!("Invalid state format: {}", e))?;
-                db.delete_valid_state(&task, &TaskValidState::Gitversion(state))?;
-                println!("Deleted valid state for GitVersion");
-            }
+    } else if let Some(task) = &cli.delete_task_state {
+        if let Some(state_value) = &cli.state_value {
+            let state = match task {
+                SupportedTask::Gitversion => {
+                    TaskValidState::Gitversion(
+                        GitVersionState::from_string(state_value)
+                            .map_err(|e| anyhow::anyhow!("Invalid GitVersion state format: {}", e))?
+                    )
+                }
+                SupportedTask::Default(_) => {
+                    TaskValidState::Default(state_value.to_string())
+                }
+            };
+            db.delete_valid_state(task, &state)?;
+            println!("Deleted task state for {}: {}", task, state_value);
+        } else {
+            println!("Error: --state-value is required when using --delete-task-state");
+            return Ok(());
         }
     } else {
         println!("Invalid combination of arguments. Use --help for usage information.");
@@ -252,44 +275,47 @@ async fn handle_other_cli_args(cli: &crate::Cli, db: &Database) -> Result<()> {
     Ok(())
 }
 
-async fn handle_list_task_states(task: SupportedTask, db: &Database) -> Result<()> {
-    let states = db.list_valid_states(&task)?;
-    println!("\nValid states for {}:", task);
-    println!("{}", "-".repeat(60));
-    if states.is_empty() {
-        println!("  No valid states defined yet.");
-        println!("  To add a state, use:");
-        println!("    --add-task-state {} --state-value \"setup:VERSION,execute:VERSION,spec:VERSION\"", task);
-        println!("  Example:");
-        println!("    --add-task-state {} --state-value \"setup:3,execute:3,spec:6.0.3\"", task);
-    } else {
-        for state in states {
-            match state {
-                TaskValidState::Gitversion(gv) => {
-                    println!("  setup: v{}", gv.setup_version);
-                    println!("  execute: v{}", gv.execute_version);
-                    println!("  spec: v{}", gv.spec_version);
-                    println!();
-                }
-            }
-        }
-    }
-    Ok(())
-}
+// async fn handle_list_task_states(task: SupportedTask, db: &Database) -> Result<()> {
+//     let states = db.list_valid_states(&task)?;
+//     println!("\nValid states for {}:", task);
+//     println!("{}", "-".repeat(60));
+//     if states.is_empty() {
+//         println!("  No valid states defined yet.");
+//         println!("  To add a state, use:");
+//         println!("    --add-task-state {} --state-value \"setup:VERSION,execute:VERSION,spec:VERSION\"", task);
+//         println!("  Example:");
+//         println!("    --add-task-state {} --state-value \"setup:3,execute:3,spec:6.0.3\"", task);
+//     } else {
+//         for state in states {
+//             match state {
+//                 TaskValidState::Gitversion(gv) => {
+//                     println!("  setup: v{}", gv.setup_version);
+//                     println!("  execute: v{}", gv.execute_version);
+//                     println!("  spec: v{}", gv.spec_version);
+//                     println!();
+//                 },
+//                 TaskValidState::Default(version) => {
+//                     println!("  version: v{}", version);
+//                     println!();
+//                 }
+//             }
+//         }
+//     }
+//     Ok(())
+// }
 
 async fn handle_list_all_task_states(db: &Database) -> Result<()> {
-    println!("Valid states for all supported tasks:");
-    println!("------------------------------------------------------------");
-
-    for task in SupportedTask::value_variants() {
-        let states = db.list_valid_states(task)?;
-        println!("{}:", task);
-        println!("{}", crate::format_task_states(task, states));
+    let tasks = db.get_all_tasks()?;
+    
+    for task in tasks {
+        let states = db.list_valid_states(&task)?;
+        println!("\nValid states for {}:", task);
+        println!("{}", crate::format_task_states(&task, states));
     }
     Ok(())
 }
 
-fn load_config_if_needed(cli: &crate::Cli) -> Result<Option<Config>> {
+fn load_config_if_needed(cli: &Cli) -> Result<Option<Config>> {
     // Check if the command needs state configuration
     let needs_config = cli.search_task.is_some()
         || cli.delete_task_state.is_some()
@@ -306,4 +332,17 @@ fn load_config_if_needed(cli: &crate::Cli) -> Result<Option<Config>> {
     } else {
         Ok(None)
     }
+}
+
+// fn list_supported_tasks() {
+//     for task in SupportedTask::get_all_variants() {
+//         println!("  {}", task);
+//     }
+// }
+
+fn list_task_states(db: &Database, task: &SupportedTask) -> Result<()> {
+    let states = db.list_valid_states(task)?;
+    println!("Valid states for {}:", task);
+    println!("{}", crate::format_task_states(task, states));
+    Ok(())
 }

@@ -43,6 +43,15 @@ impl Config {
                 .cloned()
                 .map(TaskValidState::Gitversion)
                 .collect(),
+            SupportedTask::Default(name) => self.task_states.other_tasks
+                .get(name)
+                .map(|versions| {
+                    versions.iter()
+                        .cloned()
+                        .map(TaskValidState::Default)
+                        .collect()
+                })
+                .unwrap_or_default(),
             // Add other task types here as needed
         }
     }

@@ -1,91 +1,139 @@
 use anyhow::Result;
 use itertools::Itertools;
-use chrono::Local;
-use clap::ValueEnum;
 use crate::{
-    SupportedTask,
     TaskIssues,
     format_task_states,
     collect_task_usage_data,
-    check_all_task_implementations,
-    ensure_all_repos_exist,
 };
 use crate::database::Database;
+use std::path::PathBuf;
+use std::collections::HashMap;
 
-pub async fn generate_markdown_report(repos: &[String], db: &Database, no_update: bool) -> Result<String> {
-    ensure_all_repos_exist(db, no_update).await?;
+pub async fn generate_markdown_report(
+    repos: &[String], 
+    db: &Database,
+    issues: &TaskIssues,
+) -> Result<String> {
     let mut md = String::new();
-    let mut issues = TaskIssues::default();
     
-    md.push_str("# Azure Pipeline Tasks Analysis\n\n");
-    md.push_str(&format!("*Report generated on {}*\n\n", Local::now().format("%Y-%m-%d %H:%M:%S")));
-
-    // Summary section
-    md.push_str("## Summary\n\n");
-    check_all_task_implementations(repos, Some(&mut issues), no_update).await?;
-    
-    generate_issues_summary(&mut md, &issues);
+    generate_header(&mut md);
+    generate_summary_section(&mut md, issues)?;
     generate_valid_states_section(&mut md, db).await?;
-    generate_detailed_issues_section(&mut md, &issues);
+    generate_issues_section(&mut md, issues)?;
+    generate_implementation_details(&mut md, issues)?;
     generate_task_usage_section(&mut md, repos).await?;
-
+    
     Ok(md)
 }
 
-fn generate_issues_summary(md: &mut String, issues: &TaskIssues) {
-    if !issues.missing_states.is_empty() || !issues.invalid_states.is_empty() {
-        md.push_str("### Issues Requiring Attention\n\n");
-        
-        if !issues.missing_states.is_empty() {
-            md.push_str(&format!("- **{}** tasks missing valid state definitions\n", 
-                issues.missing_states.len()));
-        }
-        
-        if !issues.invalid_states.is_empty() {
-            let total_invalid = issues.invalid_states.values()
-                .map(|repos| repos.len())
-                .sum::<usize>();
-            md.push_str(&format!("- **{}** implementations with invalid states across {} tasks\n", 
-                total_invalid,
-                issues.invalid_states.len()));
-        }
-        md.push_str("\n");
-    }
+fn generate_header(md: &mut String) {
+    let now = chrono::Local::now();
+    md.push_str("# Pipeline Task Analysis Report\n\n");
+    md.push_str(&format!("Generated on: {}\n\n", now.format("%Y-%m-%d %H:%M:%S")));
 }
 
-async fn generate_valid_states_section(md: &mut String, db: &Database) -> Result<()> {
-    md.push_str("## Valid Task States\n\n");
-    for task in SupportedTask::value_variants() {
-        md.push_str(&format!("### {}\n\n{}\n\n", 
-            task, 
-            format_task_states(task, db.list_valid_states(task)?)));
-    }
+fn generate_summary_section(md: &mut String, issues: &TaskIssues) -> Result<()> {
+    md.push_str("## Summary\n\n");
+    
+    // Count total implementations
+    let total_impls = issues.all_implementations.values()
+        .map(|v| v.len())
+        .sum::<usize>();
+    
+    md.push_str(&format!("- Total implementations analyzed: **{}**\n", total_impls));
+    md.push_str(&format!("- Tasks with missing states: **{}**\n", issues.missing_states.len()));
+    
+    let invalid_count = issues.invalid_states.values()
+        .map(|repos| repos.len())
+        .sum::<usize>();
+    md.push_str(&format!("- Invalid state implementations: **{}**\n\n", invalid_count));
+    
     Ok(())
 }
 
-fn generate_detailed_issues_section(md: &mut String, issues: &TaskIssues) {
+fn generate_issues_section(md: &mut String, issues: &TaskIssues) -> Result<()> {
     if !issues.missing_states.is_empty() || !issues.invalid_states.is_empty() {
-        md.push_str("## Detailed Issues\n\n");
+        md.push_str("## Issues Found\n\n");
         
         if !issues.missing_states.is_empty() {
-            md.push_str("### Tasks Needing State Definitions\n\n");
-            for task in issues.missing_states.iter().sorted() {
+            md.push_str("### Tasks Missing State Definitions\n\n");
+            for task in &issues.missing_states {
                 md.push_str(&format!("- {}\n", task));
             }
             md.push_str("\n");
         }
-
+        
         if !issues.invalid_states.is_empty() {
             md.push_str("### Invalid State Implementations\n\n");
-            for (task, repos) in issues.invalid_states.iter().sorted() {
-                md.push_str(&format!("#### {} ({} repos)\n\n", task, repos.len()));
-                for repo in repos.iter().sorted() {
+            for (task, repos) in &issues.invalid_states {
+                md.push_str(&format!("#### {}\n\n", task));
+                for (repo, impls) in repos {
                     md.push_str(&format!("- {}\n", repo));
+                    for impl_ in impls {
+                        md.push_str(&format!("  - {}: {}\n", impl_.version, impl_.file_path.display()));
+                    }
                 }
                 md.push_str("\n");
             }
         }
     }
+    Ok(())
+}
+
+fn generate_implementation_details(md: &mut String, issues: &TaskIssues) -> Result<()> {
+    md.push_str("## Implementation Details\n\n");
+    
+    for (task, impls) in &issues.all_implementations {
+        md.push_str(&format!("### {}\n\n", task));
+        
+        // Group implementations by version
+        let mut by_version: HashMap<String, Vec<(&String, &PathBuf)>> = HashMap::new();
+        
+        for impl_ in impls {
+            by_version
+                .entry(impl_.version.clone())
+                .or_default()
+                .push((&impl_.repo_name, &impl_.file_path));
+        }
+        
+        // Sort versions for consistent output
+        let mut versions: Vec<_> = by_version.keys().collect();
+        versions.sort();
+        
+        for version in versions {
+            let impls = &by_version[version];
+            md.push_str(&format!("#### Version {}\n\n", version));
+            
+            // Group by repo
+            let mut by_repo: HashMap<&String, Vec<&PathBuf>> = HashMap::new();
+            for (repo, path) in impls {
+                by_repo.entry(repo).or_default().push(path);
+            }
+            
+            for (repo, paths) in by_repo {
+                if paths.len() > 1 {
+                    md.push_str(&format!("- {} ({} occurrences)\n", repo, paths.len()));
+                    for path in paths {
+                        md.push_str(&format!("  - {}\n", path.display()));
+                    }
+                } else {
+                    md.push_str(&format!("- {}: {}\n", repo, paths[0].display()));
+                }
+            }
+            md.push_str("\n");
+        }
+    }
+    Ok(())
+}
+
+async fn generate_valid_states_section(md: &mut String, db: &Database) -> Result<()> {
+    md.push_str("## Valid Task States\n\n");
+    for task in db.get_all_tasks()? {
+        md.push_str(&format!("### {}\n\n{}\n\n", 
+            task, 
+            format_task_states(&task, db.list_valid_states(&task)?)));
+    }
+    Ok(())
 }
 
 async fn generate_task_usage_section(md: &mut String, repos: &[String]) -> Result<()> {
@@ -115,8 +163,12 @@ async fn generate_task_usage_section(md: &mut String, repos: &[String]) -> Resul
                             md.push_str(&format!("  - {}\n", rel_path.display()));
                         }
                     }
-                } else {
-                    md.push_str(&format!("- {}\n", repo_name));
+                } else if let Some(path) = paths.first() {
+                    if let Ok(rel_path) = path.strip_prefix(repo_name) {
+                        md.push_str(&format!("- {}: {}\n", repo_name, rel_path.display()));
+                    } else {
+                        md.push_str(&format!("- {}: {}\n", repo_name, path.display()));
+                    }
                 }
             }
             md.push_str("\n");

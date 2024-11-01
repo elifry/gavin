@@ -5,7 +5,6 @@ use crate::TaskValidState;
 use crate::git_manager::GitManager;
 use std::path::PathBuf;
 use crate::config::Config;
-use clap::ValueEnum;
 
 pub struct Database {
     conn: Connection,
@@ -83,55 +82,53 @@ impl Database {
         Ok(urls)
     }
 
-    pub fn add_valid_state(&self, task: &SupportedTask, state: &TaskValidState) -> Result<()> {
-        let state_json = serde_json::to_string(state)
-            .map_err(|e| anyhow::anyhow!("Failed to serialize state: {}", e))?;
+    fn serialize_state(state: &TaskValidState) -> Result<String> {
+        serde_json::to_string(state)
+            .map_err(|e| anyhow::anyhow!("Failed to serialize state: {}", e))
+    }
 
+    fn deserialize_state(json: &str) -> Result<TaskValidState> {
+        serde_json::from_str(json)
+            .map_err(|e| anyhow::anyhow!("Failed to deserialize state: {}", e))
+    }
+
+    pub fn add_valid_state(&self, task: &SupportedTask, state: &TaskValidState) -> Result<()> {
+        let state_json = Self::serialize_state(state)?;
+        // println!("Storing task '{}' with state_json: {}", task, state_json);
         self.conn.execute(
             "INSERT INTO valid_states (task, state_json) VALUES (?1, ?2)",
             params![task.to_string(), state_json],
         )?;
-
         Ok(())
     }
 
     pub fn list_valid_states(&self, task: &SupportedTask) -> Result<Vec<TaskValidState>> {
-        let table_exists: bool = self.conn.query_row(
-            "SELECT EXISTS (
-                SELECT 1 FROM sqlite_master WHERE type='table' AND name='valid_states'
-            )",
-            [],
-            |row| row.get(0),
-        )?;
-
-        if !table_exists {
-            return Ok(Vec::new());
-        }
-
-        let mut stmt = self.conn.prepare(
-            "SELECT state_json FROM valid_states WHERE task = ?1"
+        let mut stmt = self.prepare_statement(
+            "SELECT DISTINCT state_json FROM valid_states WHERE LOWER(task) = LOWER(?1)"
         )?;
         
-        let states = stmt.query_map(
-            params![task.to_string()],
-            |row| {
-                let json: String = row.get(0)?;
-                Ok(serde_json::from_str(&json)
-                    .map_err(|e| rusqlite::Error::InvalidParameterName(e.to_string()))?)
-            },
-        )?
-        .collect::<Result<Vec<_>, _>>()?;
+        let states = stmt.query_map([&task.to_string()], |row| {
+            let json: String = row.get(0)?;
+            println!("Found state_json: {}", json);
+            Self::deserialize_state(&json)
+                .map_err(|e| rusqlite::Error::InvalidParameterName(e.to_string()))
+        })?;
 
-        Ok(states)
+        let mut result = Vec::new();
+        for state in states {
+            result.push(state?);
+        }
+        Ok(result)
     }
 
     pub fn delete_valid_state(&self, task: &SupportedTask, state: &TaskValidState) -> Result<()> {
+        let task_name = task.to_string().to_lowercase();
         let state_json = serde_json::to_string(state)
             .map_err(|e| anyhow::anyhow!("Failed to serialize state: {}", e))?;
 
         self.conn.execute(
             "DELETE FROM valid_states WHERE task = ?1 AND state_json = ?2",
-            params![task.to_string(), state_json],
+            params![task_name, state_json],
         )?;
 
         Ok(())
@@ -207,16 +204,62 @@ impl Database {
     }
 
     pub fn merge_config_states(&self, config: &Config) -> Result<()> {
-        // First, clear existing states
-        self.conn.execute("DELETE FROM valid_states", [])?;
-        
-        // Add states from config
-        for task in SupportedTask::value_variants() {
-            for state in config.get_valid_states(task) {
-                self.add_valid_state(task, &state)?;
+        // Only merge states if they exist in the config
+        if !config.task_states.gitversion.is_empty() {
+            // Clear existing gitversion states
+            self.conn.execute(
+                "DELETE FROM valid_states WHERE LOWER(task) = 'gitversion'", 
+                [],
+            )?;
+            
+            // Add gitversion states
+            let task = SupportedTask::Gitversion;
+            for state in config.get_valid_states(&task) {
+                self.add_valid_state(&task, &state)?;
+            }
+        }
+
+        // Handle other tasks from config
+        for (task_name, versions) in &config.task_states.other_tasks {
+            if !versions.is_empty() {
+                let task = SupportedTask::Default(task_name.clone());
+                // Clear existing states for this task
+                self.conn.execute(
+                    "DELETE FROM valid_states WHERE LOWER(task) = LOWER(?1)",
+                    params![task_name],
+                )?;
+                
+                // Add new states
+                for state in config.get_valid_states(&task) {
+                    self.add_valid_state(&task, &state)?;
+                }
             }
         }
         
         Ok(())
+    }
+
+    pub fn prepare_statement(&self, sql: &str) -> Result<rusqlite::Statement> {
+        Ok(self.conn.prepare(sql)?)
+    }
+
+    pub fn get_all_tasks(&self) -> Result<Vec<SupportedTask>> {
+        let mut tasks = vec![SupportedTask::Gitversion];
+        
+        // Add any other tasks found in the database
+        let mut stmt = self.prepare_statement("SELECT DISTINCT task FROM valid_states")?;
+        let task_iter = stmt.query_map([], |row| {
+            let task_str: String = row.get(0)?;
+            Ok(task_str)
+        })?;
+
+        for task_result in task_iter {
+            let task_str = task_result?;
+            if task_str.to_lowercase() != "gitversion" {
+                tasks.push(SupportedTask::Default(task_str));
+            }
+        }
+
+        Ok(tasks)
     }
 }
