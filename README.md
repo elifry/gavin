@@ -1,6 +1,8 @@
 # `gavin` (Global Action Version INspector)
 
-For large companies with many repositories, it is often difficult to ensure that all the pipeline actions are using the same version.
+Pipeline standardization tool.
+
+If you have many repositories, it is often difficult to ensure that all the pipeline actions are using the same version.
 
 `gavin` is a tool to inspect, validate, and update the versions of all pipeline actions globally.
 
