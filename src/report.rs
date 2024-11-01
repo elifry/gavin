@@ -60,7 +60,7 @@ fn generate_issues_section(md: &mut String, issues: &TaskIssues) -> Result<()> {
             for task in &issues.missing_states {
                 md.push_str(&format!("- {}\n", task));
             }
-            md.push_str("\n");
+            md.push('\n');
         }
         
         if !issues.invalid_states.is_empty() {
@@ -73,7 +73,7 @@ fn generate_issues_section(md: &mut String, issues: &TaskIssues) -> Result<()> {
                         md.push_str(&format!("  - {}: {}\n", impl_.version, impl_.file_path.display()));
                     }
                 }
-                md.push_str("\n");
+                md.push('\n');
             }
         }
     }
@@ -120,7 +120,7 @@ fn generate_implementation_details(md: &mut String, issues: &TaskIssues) -> Resu
                     md.push_str(&format!("- {}: {}\n", repo, paths[0].display()));
                 }
             }
-            md.push_str("\n");
+            md.push('\n');
         }
     }
     Ok(())
@@ -171,7 +171,7 @@ async fn generate_task_usage_section(md: &mut String, repos: &[String]) -> Resul
                     }
                 }
             }
-            md.push_str("\n");
+            md.push('\n');
         }
     }
     Ok(())

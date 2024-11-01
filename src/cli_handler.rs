@@ -78,7 +78,7 @@ pub async fn handle_cli_args(cli: &Cli, db: &Database) -> Result<()> {
                 }
             }
         },
-        _ => handle_other_cli_args(cli, &db).await?,
+        _ => handle_other_cli_args(cli, db).await?,
     }
 
     Ok(())
@@ -238,7 +238,7 @@ async fn handle_other_cli_args(cli: &Cli, db: &Database) -> Result<()> {
         
         if cli.output_markdown {
             let issues = check_all_task_implementations(&repos, None, cli.no_update).await?;
-            let report = generate_markdown_report(&repos, &db, &issues).await?;
+            let report = generate_markdown_report(&repos, db, &issues).await?;
             let report_path = cli.report_path.as_deref().unwrap_or("report.md");
             
             // Sanitize the output path

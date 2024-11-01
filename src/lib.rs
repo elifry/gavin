@@ -129,13 +129,8 @@ async fn find_pipeline_files(repo_path: &Path) -> Result<Vec<PathBuf>> {
                 .filter_map(Result::ok)
             {
                 let path = entry.path().to_path_buf();
-                if path.extension().map_or(false, |ext| ext == "yml" || ext == "yaml") {
-                    if path.to_string_lossy().contains("pipeline") {
-                        // Use try_send to avoid blocking if channel is full
-                        if tx.blocking_send(path).is_err() {
-                            break; // Channel closed, receiver dropped
-                        }
-                    }
+                if path.extension().map_or(false, |ext| ext == "yml" || ext == "yaml") && path.to_string_lossy().contains("pipeline") && tx.blocking_send(path).is_err() {
+                    break; // Channel closed, receiver dropped
                 }
             }
         }
